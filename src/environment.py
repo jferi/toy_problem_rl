@@ -1,113 +1,102 @@
 import torch
-from torch import Tensor
-from src.config import Config, PriceSeq, PosSeq, State, Action, Reward, action_2_pos
+from typing import Tuple
+
+from trading_dqn.src.config import EnvConfig
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class Environment:
-    def __init__(self, conf: Config):
-        self.conf = conf
-        # ===== Consume configuration parameters =====
-        # === Data tensor sizes
-        self.B = conf.batch_size
-        self.T = conf.window_size
-        # === Price dynamics
-        self.S_mean = conf.S_mean
-        self.vol = conf.volatility
-        self.kappa = conf.mean_reversion
-        # === Reward specification
-        self.disc_f = conf.discount_factor
-        self.half_ba = conf.half_bidask
-        self.risk_av = conf.risk_aversion
-        # === Action interpretation
-        # self.action_pos = conf.action_pos
-        # === Initialize state tensors
-        self.price_seq = self._simulate_initial_price_seq()
-        self.pos_seq = torch.zeros((self.B, self.T), dtype=torch.float32)
+class TradingEnvironment:
+    
+    def __init__(
+        self,
+        batch_size: int = EnvConfig.BATCH_SIZE,
+        s_mean: float = EnvConfig.S_MEAN,
+        vol: float = EnvConfig.VOL,
+        kappa: float = EnvConfig.KAPPA,
+        half_ba: float = EnvConfig.HALF_BA,
+        risk_av: float = EnvConfig.RISK_AV,
+        lookback: int = EnvConfig.LOOKBACK,
+        max_steps: int = EnvConfig.MAX_STEPS
+    ):
+        self.batch_size = batch_size
+        self.s_mean = s_mean
+        self.vol = vol
+        self.kappa = kappa
+        self.half_ba = half_ba
+        self.risk_av = risk_av
+        self.lookback = lookback
+        self.max_steps = max_steps
+        
+        self.current_prices = None
+        self.price_history = None
+        self.position_history = None
+        self.current_position = None
+        self.step_count = None
+        
+    def reset(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Reset environment to initial state"""
+        self.current_prices = torch.tensor(
+            self.s_mean + torch.randn(self.batch_size) * self.vol,
+            dtype=torch.float32, device=device
+        )
+        
+        self.price_history = torch.zeros(
+            (self.batch_size, self.lookback), 
+            dtype=torch.float32, device=device
+        )
+        self.position_history = torch.zeros(
+            (self.batch_size, self.lookback), 
+            dtype=torch.float32, device=device
+        )
+        
+        self.price_history[:, -1] = self.current_prices
+        self.current_position = torch.zeros(
+            self.batch_size, dtype=torch.float32, device=device
+        )
+        self.step_count = 0
+        
+        return self._get_state()
+    
+    def _get_state(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return normalized state"""
+        normalized_prices = (self.price_history - self.s_mean) / (5 * self.vol)
+        return normalized_prices, self.position_history
+    
+    def step(self, actions: torch.Tensor) -> Tuple[
+        Tuple[torch.Tensor, torch.Tensor], torch.Tensor, torch.Tensor
+    ]:
+        """Execute one timestep: action -> next_state, reward, done"""
+        # Convert actions (0,1,2) to positions (-1,0,1)
+        new_positions = actions.float() - 1.0
+        
+        # Price dynamics: mean-reverting with random shocks
+        random_shocks = torch.randn(self.batch_size, device=device) * self.vol
+        mean_reversion = -self.kappa * (self.current_prices - self.s_mean)
+        price_changes = random_shocks + mean_reversion
+        new_prices = self.current_prices + price_changes
+        
+        # Reward components
+        pnl = new_positions * price_changes
+        trading_cost = self.half_ba * torch.abs(new_positions - self.current_position)
+        risk_penalty = self.risk_av * (self.vol ** 2) * (new_positions ** 2)
+        rewards = pnl - trading_cost - risk_penalty
+        
+        # Update state
+        self.price_history = torch.roll(self.price_history, shifts=-1, dims=1)
+        self.price_history[:, -1] = new_prices
+        
+        self.position_history = torch.roll(self.position_history, shifts=-1, dims=1)
+        self.position_history[:, -1] = new_positions
+        
+        self.current_prices = new_prices
+        self.current_position = new_positions
+        self.step_count += 1
+        
+        # Check if episode is done
+        dones = torch.zeros(self.batch_size, dtype=torch.bool, device=device)
+        if self.step_count >= self.max_steps:
+            dones[:] = True
+        
+        return self._get_state(), rewards, dones
 
-    def _simulate_next_price(self, current_price: Tensor) -> Tensor:
-        """Simulate one-step mean-reverting price update."""
-        drift = -self.kappa * (current_price - self.S_mean)
-        noise = self.vol * torch.randn(self.B, device=current_price.device)
-        next_price = current_price + drift + noise
-        return next_price
-
-    def _simulate_initial_price_seq(self):
-        """Simulate an initial window of prices via recursive mean reversion."""
-        price_seq = torch.ones((self.B, self.T), dtype=torch.float32) * self.S_mean
-        for t in range(self.T - 1):
-            price_seq[:, t+1] = self._simulate_next_price(price_seq[:, t])
-        return price_seq
-
-    @torch.no_grad()
-    def resolve_action(self, action: Action) -> tuple[State, Reward]:
-        """
-        Advance the environment one time-step given an action.
-        Args:
-            action: long Tensor (B,)
-        Returns:
-            (new_price_seq, new_pos_seq): float32 tensors (B, T)
-            reward: float32 tensor (B,)
-        """
-        # === Interpret action, simulate new price, compute reward
-        new_pos = action_2_pos(action)
-        new_price = self._simulate_next_price(self.price_seq[:, -1])
-        d_price = new_price - self.price_seq[:, -1]
-        reward = new_pos * d_price                                         # daily return
-        reward -= self.half_ba * torch.abs(new_pos - self.pos_seq[:, -1])  # bid-ask friction
-        reward -= self.risk_av * ((self.vol * new_pos) ** 2.0)             # risk aversion
-        # === Compute *functional* new state = (new_price_seq, new_pos_seq)
-        new_price_seq = torch.roll(self.price_seq, shifts=-1, dims=1)
-        new_price_seq[:, -1] = new_price
-        new_pos_seq = torch.roll(self.pos_seq, shifts=-1, dims=1)
-        new_pos_seq[:, -1] = new_pos
-        # === in-place commit
-        self.price_seq.copy_(new_price_seq)
-        self.pos_seq.copy_(new_pos_seq)
-        # === return safe, detached output tensors
-        state = new_price_seq.detach(), new_pos_seq.detach()
-        return state, reward
-
-    def print_data(self, price_seq, pos_seq, n=3, reward=None):
-        n = min(n, self.B)
-        for i in range(n):
-            prices = price_seq[i].cpu().numpy()
-            # positions = pos_seq[i].cpu().numpy().astype(int)
-            positions = pos_seq[i].cpu().numpy()
-            print(f"[Agent {i:02d}] Prices: {prices.round(2)}")
-            print(f"           Pos   : {positions}")
-            if reward is not None:
-                rew = reward[i].cpu().numpy()
-                print(f"           Reward : {float(rew):.2f}")
-            print("-" * 60)
-
-    def print_env(self, n=3):
-        """
-        Print a compact view of the internal class state.
-        Args:
-            n (int): Max number of batch elements to display (default: 3)
-        """
-        n = min(n, self.B)
-        print("=" * 60)
-        print(f"Environment snapshot (showing {n}/{self.B} agents):")
-        print(f"vol={self.vol:.4f}, kappa={self.kappa:.4f}, mean={self.S_mean:.2f}")
-        print("-" * 60)
-        self.print_data(price_seq=self.price_seq, pos_seq=self.pos_seq, n=n)
-
-
-# ------------------ SANITY CHECK ------------------ #
-if __name__ == "__main__":
-    conf = Config()
-    market = Environment(conf)
-    n_show = 2
-    print("\n ***** Initial state of market environment:")
-    market.print_env(n=n_show)
-    action = 0 * torch.ones(conf.batch_size, dtype=torch.long)  # Short
-    ((price_seq1, pos_seq1), reward1) = market.resolve_action(action)
-    action = 2 * torch.ones(conf.batch_size, dtype=torch.long)  # Long
-    ((price_seq2, pos_seq2), reward2) = market.resolve_action(action)
-    print("\n ***** Final state of market environment:")
-    market.print_env(n=n_show)
-    print("\n ***** Last output of resolve_action():")
-    market.print_data(price_seq2, pos_seq2, n=n_show, reward=reward2)
-
-    print("Sanity check passed.")
