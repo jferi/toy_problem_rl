@@ -4,8 +4,7 @@ import torch.nn.functional as F
 import random
 from typing import Optional
 
-from src.config import AgentConfig, EnvConfig
-
+from src.config import Config
 from .network import DQNNetwork
 from .replay_buffer import ReplayBuffer
 
@@ -14,33 +13,24 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DQNAgent:
     
-    def __init__(
-        self,
-        lookback: int = EnvConfig.LOOKBACK,
-        learning_rate: float = AgentConfig.LEARNING_RATE,
-        gamma: float = AgentConfig.GAMMA,
-        epsilon_start: float = AgentConfig.EPSILON_START,
-        epsilon_end: float = AgentConfig.EPSILON_END,
-        epsilon_decay: float = AgentConfig.EPSILON_DECAY,
-        target_update: int = AgentConfig.TARGET_UPDATE,
-        batch_size: int = AgentConfig.BATCH_SIZE
-    ):
-        self.lookback = lookback
-        self.gamma = gamma
-        self.epsilon = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
-        self.target_update = target_update
-        self.batch_size = batch_size
+    def __init__(self, conf: Config):
+        self.conf = conf
+        self.lookback = conf.lookback
+        self.gamma = conf.gamma
+        self.epsilon = conf.epsilon_start
+        self.epsilon_end = conf.epsilon_end
+        self.epsilon_decay = conf.epsilon_decay
+        self.target_update = conf.target_update
+        self.batch_size = conf.batch_size
         
         # Q-network and target network
-        self.q_network = DQNNetwork(lookback).to(device)
-        self.target_network = DQNNetwork(lookback).to(device)
+        self.q_network = DQNNetwork(conf).to(device)
+        self.target_network = DQNNetwork(conf).to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
         
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
-        self.memory = ReplayBuffer(capacity=AgentConfig.BUFFER_CAPACITY)
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=conf.learning_rate)
+        self.memory = ReplayBuffer(conf)
         self.steps_done = 0
     
     def select_action(
@@ -101,4 +91,3 @@ class DQNAgent:
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
         
         return loss.item()
-

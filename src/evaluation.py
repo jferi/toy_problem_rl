@@ -2,26 +2,33 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
+from src.config import Config
 from .environment import TradingEnvironment
 from .agent import DQNAgent
-from src.config import EvaluationConfig
+
 
 def evaluate_agent(
     agent: DQNAgent,
-    num_episodes: int = EvaluationConfig.NUM_EPISODES,
-    max_steps: int = EvaluationConfig.MAX_STEPS,
-    batch_size: int = EvaluationConfig.BATCH_SIZE,
-    visualize: bool = EvaluationConfig.VISUALIZE
+    conf: Config,
+    num_episodes: int = 10,
+    visualize: bool = True
 ):
     print("\n" + "=" * 80)
     print("AGENT EVALUATION")
     print("=" * 80)
     
-    env = TradingEnvironment(
-        batch_size=batch_size,
-        lookback=agent.lookback,
-        max_steps=max_steps
+    # Use batch_size=1 for evaluation
+    eval_conf = Config(
+        batch_size=1,
+        lookback=conf.lookback,
+        max_steps=conf.max_steps,
+        S_mean=conf.S_mean,
+        vol=conf.vol,
+        kappa=conf.kappa,
+        half_ba=conf.half_ba,
+        risk_av=conf.risk_av
     )
+    env = TradingEnvironment(eval_conf)
     
     total_rewards = []
     sample_prices = []
@@ -35,7 +42,7 @@ def evaluate_agent(
         if episode == 0:
             sample_prices.append(env.current_prices[0].item())
         
-        for step in range(max_steps):
+        for step in range(conf.max_steps):
             with torch.no_grad():
                 actions = agent.select_action(state_price, state_pos, training=False)
             
@@ -151,4 +158,3 @@ def plot_training_metrics(episode_rewards, losses, epsilons):
     
     plt.tight_layout()
     plt.show()
-

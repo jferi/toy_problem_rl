@@ -4,6 +4,7 @@ import random
 import warnings
 warnings.filterwarnings('ignore')
 
+from src.config import Config
 from src.training import train_dqn
 from src.evaluation import evaluate_agent, plot_training_metrics
 
@@ -19,30 +20,26 @@ print(f"Using device: {device}")
 
 def main():
     print("\n" + "╔" + "═" * 78 + "╗")
-    print("║" + " " * 20 + "DQN MEAN-REVERTING TRADING" + " " * 31 + "║")
+    print("║" + " " * 20 + "DQN MEAN-REVERTING TRADING" + " " * 32 + "║")
     print("╚" + "═" * 78 + "╝\n")
     
-    # Hyperparameters
-    NUM_EPISODES = 500
-    BATCH_SIZE = 128
-    MAX_STEPS = 500
-    LOOKBACK = 10
+    # Create unified config
+    conf = Config(
+        num_episodes=500,
+        batch_size=128,
+        max_steps=500,
+        lookback=10
+    )
     
     print("HYPERPARAMETERS:")
-    print(f"  Episodes: {NUM_EPISODES}")
-    print(f"  Batch size: {BATCH_SIZE}")
-    print(f"  Max steps per episode: {MAX_STEPS}")
-    print(f"  Lookback window: {LOOKBACK}")
+    print(f"  Episodes: {conf.num_episodes}")
+    print(f"  Batch size: {conf.batch_size}")
+    print(f"  Max steps per episode: {conf.max_steps}")
+    print(f"  Lookback window: {conf.lookback}")
     print()
     
     # Train agent
-    agent, episode_rewards, losses, epsilons = train_dqn(
-        num_episodes=NUM_EPISODES,
-        batch_size=BATCH_SIZE,
-        max_steps=MAX_STEPS,
-        lookback=LOOKBACK,
-        print_every=20
-    )
+    agent, episode_rewards, losses, epsilons = train_dqn(conf)
     
     # Plot training metrics
     print("\nGenerating learning curves...")
@@ -51,8 +48,8 @@ def main():
     # Evaluate agent
     avg_reward, std_reward = evaluate_agent(
         agent,
+        conf,
         num_episodes=10,
-        max_steps=MAX_STEPS,
         visualize=True
     )
     
@@ -75,4 +72,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

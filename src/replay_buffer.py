@@ -3,7 +3,7 @@ import random
 from collections import deque, namedtuple
 from typing import Tuple
 
-from src.config import AgentConfig
+from src.config import Config
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -14,8 +14,8 @@ Experience = namedtuple('Experience',
 
 class ReplayBuffer:
     
-    def __init__(self, capacity: int = AgentConfig.BUFFER_CAPACITY):
-        self.buffer = deque(maxlen=capacity)
+    def __init__(self, conf: Config):
+        self.buffer = deque(maxlen=conf.buffer_capacity)
     
     def push(
         self,
@@ -57,4 +57,3 @@ class ReplayBuffer:
     
     def __len__(self):
         return len(self.buffer)
-

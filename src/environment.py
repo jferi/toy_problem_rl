@@ -1,32 +1,22 @@
 import torch
 from typing import Tuple
 
-from trading_dqn.src.config import EnvConfig
+from src.config import Config
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class TradingEnvironment:
     
-    def __init__(
-        self,
-        batch_size: int = EnvConfig.BATCH_SIZE,
-        s_mean: float = EnvConfig.S_MEAN,
-        vol: float = EnvConfig.VOL,
-        kappa: float = EnvConfig.KAPPA,
-        half_ba: float = EnvConfig.HALF_BA,
-        risk_av: float = EnvConfig.RISK_AV,
-        lookback: int = EnvConfig.LOOKBACK,
-        max_steps: int = EnvConfig.MAX_STEPS
-    ):
-        self.batch_size = batch_size
-        self.s_mean = s_mean
-        self.vol = vol
-        self.kappa = kappa
-        self.half_ba = half_ba
-        self.risk_av = risk_av
-        self.lookback = lookback
-        self.max_steps = max_steps
+    def __init__(self, conf: Config):
+        self.batch_size = conf.batch_size
+        self.s_mean = conf.S_mean
+        self.vol = conf.vol
+        self.kappa = conf.kappa
+        self.half_ba = conf.half_ba
+        self.risk_av = conf.risk_av
+        self.lookback = conf.lookback
+        self.max_steps = conf.max_steps
         
         self.current_prices = None
         self.price_history = None
@@ -99,4 +89,3 @@ class TradingEnvironment:
             dones[:] = True
         
         return self._get_state(), rewards, dones
-

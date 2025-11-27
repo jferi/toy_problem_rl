@@ -2,20 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.config import NetworkConfig
+from src.config import Config
 
 
 class DQNNetwork(nn.Module):
     
-    def __init__(
-        self, 
-        lookback: int = NetworkConfig.LOOKBACK,
-        hidden_size: int = NetworkConfig.HIDDEN_SIZE,
-        num_actions: int = NetworkConfig.NUM_ACTIONS
-    ):
+    def __init__(self, conf: Config):
         super(DQNNetwork, self).__init__()
         
-        input_size = lookback * 2  # prices + positions
+        input_size = conf.lookback * 2  # prices + positions
+        hidden_size = conf.hidden_size
+        num_actions = conf.num_actions
         
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -47,4 +44,3 @@ class DQNNetwork(nn.Module):
         q_values = self.fc4(x)
         
         return q_values
-
